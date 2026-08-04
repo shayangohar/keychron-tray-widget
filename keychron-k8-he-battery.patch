@@ -1,0 +1,56 @@
+diff --git a/keyboards/keychron/common/keychron_raw_hid.c b/keyboards/keychron/common/keychron_raw_hid.c
+--- a/keyboards/keychron/common/keychron_raw_hid.c
++++ b/keyboards/keychron/common/keychron_raw_hid.c
+@@ -33,6 +33,7 @@
+ #    include "snap_click.h"
+ #endif
+ #if defined(LK_WIRELESS_ENABLE) || defined(KC_BLUETOOTH_ENABLE)
++#    include "battery.h"
+ #    include "wireless.h"
+ #    ifdef LK_WIRELESS_ENABLE
+ #        include "lkbt51.h"
+@@ -168,6 +169,12 @@ bool kc_raw_hid_rx(uint8_t src, uint8_t *data, uint8_t length) {
+             data[2] = get_highest_layer(layer_state);
+             break;
+
++#    if defined(LK_WIRELESS_ENABLE) || defined(KC_BLUETOOTH_ENABLE)
++        case KC_GET_BATTERY_LEVEL:
++            data[1] = battery_get_percentage();
++            break;
++#    endif
++
+         case KC_MISC_CMD_GROUP:
+             switch (data[1]) {
+                 case MISC_GET_PROTOCOL_VER:
+diff --git a/keyboards/keychron/common/keychron_raw_hid.h b/keyboards/keychron/common/keychron_raw_hid.h
+--- a/keyboards/keychron/common/keychron_raw_hid.h
++++ b/keyboards/keychron/common/keychron_raw_hid.h
+@@ -25,6 +25,7 @@ enum {
+     KC_GET_FIRMWARE_VERSION = 0xA1,
+     KC_GET_SUPPORT_FEATURE  = 0xA2,
+     KC_GET_DEFAULT_LAYER    = 0xA3,
++    KC_GET_BATTERY_LEVEL    = 0xA4,
+     KC_MISC_CMD_GROUP       = 0xA7,
+     KC_KEYCHRON_RGB         = 0xA8,
+     KC_ANALOG_MATRIX        = 0xA9,
+diff --git a/keyboards/keychron/common/wireless/wireless.c b/keyboards/keychron/common/wireless/wireless.c
+--- a/keyboards/keychron/common/wireless/wireless.c
++++ b/keyboards/keychron/common/wireless/wireless.c
+@@ -609,7 +609,7 @@ void wireless_event_task(void) {
+ #if defined(RAW_ENABLE) && defined(WILRESS_RAW_ENABLE)
+             case EVT_RAW_HID:
+ #    ifdef VIA_ENABLE
+-                via_raw_hid_receive(RAW_HID_SRC_WIRELESS, event.params.raw_hid_data, 32);
++                raw_hid_receive(RAW_HID_SRC_WIRELESS, event.params.raw_hid_data, 32);
+ #    else
+                 kc_raw_hid_rx(RAW_HID_SRC_WIRELESS, event.params.raw_hid_data, 32);
+ #    endif
+diff --git a/keyboards/keychron/k8_he/rules.mk b/keyboards/keychron/k8_he/rules.mk
+--- a/keyboards/keychron/k8_he/rules.mk
++++ b/keyboards/keychron/k8_he/rules.mk
+@@ -15,3 +15,5 @@ include keyboards/keychron/common/wireless/wireless.mk
+ VPATH += $(TOP_DIR)/keyboards/keychron
+
+ OPT = 2
++# Enable the existing raw-HID request path over the 2.4 GHz transport.
++OPT_DEFS += -DWILRESS_RAW_ENABLE

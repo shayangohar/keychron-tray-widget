@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+.dotnet-cli-home/
+.nuget-packages/
+.nuget-build.config
+publish/
