@@ -1,16 +1,20 @@
 # Keychron Battery Tray
 
-> Important
->
-> This app works only with a Keychron keyboard that has the required custom
-> firmware patch. This repository includes custom firmware only for the
-> Keychron K8 HE. Do not flash these files to another model.
->
-> For another keyboard, you must create and build your own firmware patch.
-> The app may also need its USB product IDs updated.
+## Important
+
+This app works only with a Keychron keyboard that:
+
+- supports QMK firmware; and
+- supports wireless 2.4 GHz mode.
+
+The keyboard must also use the required custom firmware patch.
+This repository includes custom firmware only for the Keychron K8 HE.
+Do not flash these files to another model. For another keyboard, you must
+create and build your own firmware patch. The app may also need its USB
+product IDs updated.
 
 This app shows Keychron battery information in the Windows tray.
-It does not use Bluetooth or the Keychron application.
+It does not use Bluetooth or the Keychron web launcher.
 
 ## Features
 
@@ -24,7 +28,8 @@ It does not use Bluetooth or the Keychron application.
 
 - Windows x64.
 - .NET 10 Desktop Runtime.
-- A Keychron keyboard with the required custom firmware patch.
+- A QMK-based Keychron keyboard with wireless 2.4 GHz support.
+- The required custom firmware patch.
 - A Keychron Link receiver for 2.4 GHz mode.
 
 The receiver is not needed for Cable mode. Bluetooth is not required.
