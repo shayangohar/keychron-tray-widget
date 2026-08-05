@@ -57,3 +57,36 @@ receiver; this patch changes only the keyboard firmware.
 
 `keychron-k8-he-battery-wired.patch` applies to Keychron QMK commit
 `07bfc38a4b11b8dac7ab758dfc5868b4229499ca` (`2025q3`).
+
+## Use this patch for another model
+
+The binary files in this folder are for the K8 HE only. Do not flash them to
+another keyboard. The patch shows the common QMK changes. It also contains
+two K8 HE files:
+
+- `keyboards/keychron/k8_he/config.h` sets model ID `2`.
+- `keyboards/keychron/k8_he/rules.mk` enables `WIRELESS_RAW_ENABLE`.
+
+For another Keychron QMK keyboard:
+
+1. Check out the QMK source revision used by that keyboard.
+2. Skip the K8 HE files when you apply the patch. Run this command from the
+   QMK source root:
+
+   ```powershell
+   git apply --check --exclude='keyboards/keychron/k8_he/*' keychron-k8-he-battery-wired.patch
+   git apply --exclude='keyboards/keychron/k8_he/*' keychron-k8-he-battery-wired.patch
+   ```
+
+3. Review the common-file changes before you build.
+4. Set a non-zero `KC_BATTERY_MODEL_ID` in the target keyboard `config.h`.
+5. Enable `WIRELESS_RAW_ENABLE` in the target `rules.mk` when required.
+6. Build the target keymap. Flash only the keyboard.
+7. Test Cable mode and 2.4 GHz mode with the tray app `--probe` command.
+
+Do not force the patch when the source code is different. Do not flash the K8
+HE images to another model. Keep the official firmware for recovery.
+
+The `0xA9` profile query is optional. It works only when the target has the
+Keychron analog-matrix profile code. The battery query works without a profile
+query.

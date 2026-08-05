@@ -16,10 +16,12 @@ internal enum KeyboardConnection
 internal sealed class TrayApplicationContext : ApplicationContext
 {
     private static readonly TimeSpan PollPeriod = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan ProfilePollPeriod = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan HoverRefreshPeriod = TimeSpan.FromSeconds(15);
 
     private readonly NotifyIcon _notifyIcon;
     private readonly System.Threading.Timer _pollTimer;
+    private readonly System.Threading.Timer _profileTimer;
     private readonly ToolStripMenuItem _autostartItem;
     private readonly SynchronizationContext _uiContext;
     private readonly SemaphoreSlim _pollGate = new(1, 1);
@@ -27,6 +29,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private DateTime _lastHoverPoll = DateTime.MinValue;
     private HidBatteryReport? _lastBattery;
     private AnalogProfileReport? _lastAnalogProfile;
+    private KeyboardConnection _lastConnection = KeyboardConnection.Disconnected;
     private bool _disposed;
 
     internal TrayApplicationContext()
@@ -35,7 +38,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Visible = true,
-            Text = "K8 HE: checking",
+            Text = "Keychron: checking",
         };
 
         var menu = new ContextMenuStrip();
@@ -60,6 +63,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.MouseMove += OnMouseMove;
 
         _pollTimer = new System.Threading.Timer(_ => _ = PollAsync(), null, Timeout.Infinite, Timeout.Infinite);
+        _profileTimer = new System.Threading.Timer(_ => _ = PollProfileAsync(), null, Timeout.Infinite, Timeout.Infinite);
 
         if (!KeychronHid.TryInitialize(out var error))
         {
@@ -68,6 +72,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _pollTimer.Change(TimeSpan.Zero, PollPeriod);
+        _profileTimer.Change(ProfilePollPeriod, ProfilePollPeriod);
     }
 
     private void OnMouseMove(object? sender, MouseEventArgs args)
@@ -112,6 +117,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     _lastAnalogProfile = result.AnalogProfile;
                 }
 
+                _lastConnection = connection;
                 Apply(connection, result.Battery, detail);
             }, null);
         }
@@ -121,6 +127,56 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 _uiContext.Post(_ => Apply(KeyboardConnection.Error, null, ex.Message), null);
             }
+        }
+        finally
+        {
+            _pollGate.Release();
+        }
+    }
+
+    private async Task PollProfileAsync()
+    {
+        if (_disposed || !await _pollGate.WaitAsync(0))
+        {
+            return;
+        }
+
+        try
+        {
+            var profile = await Task.Run(KeychronHid.ReadProfile);
+            if (_disposed || !profile.HasValue)
+            {
+                return;
+            }
+
+            _uiContext.Post(_ =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                if (_lastAnalogProfile is { } last && last == profile.Value)
+                {
+                    return;
+                }
+
+                _lastAnalogProfile = profile;
+                if (_lastBattery is { } battery)
+                {
+                    var result = new HidReadResult(
+                        _lastConnection == KeyboardConnection.Wired,
+                        battery,
+                        profile,
+                        _lastConnection == KeyboardConnection.Wireless);
+                    Apply(_lastConnection, battery, FormatDetail(_lastConnection, result));
+                }
+            }, null);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
+        {
+            // The normal poll reports device and HID errors. A profile-only
+            // check must not replace a valid battery display with an error.
         }
         finally
         {
@@ -189,10 +245,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void Apply(KeyboardConnection connection, HidBatteryReport? battery, string detail)
     {
-        var tooltip = $"K8 HE: {detail}";
+        var tooltip = $"Keychron: {detail}";
         _notifyIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
 
-        var newIcon = TrayIcon.Create(connection, battery?.Percentage ?? _lastBattery?.Percentage);
+        var newIcon = TrayIcon.Create(connection, battery ?? _lastBattery);
         var oldIcon = _currentIcon;
         _currentIcon = newIcon;
         _notifyIcon.Icon = newIcon;
@@ -205,6 +261,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _disposed = true;
             _pollTimer.Dispose();
+            _profileTimer.Dispose();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
             _currentIcon?.Dispose();
@@ -251,33 +308,42 @@ internal static class TrayIcon
     [DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr handle);
 
-    internal static Icon Create(KeyboardConnection connection, int? battery)
+    internal static Icon Create(KeyboardConnection connection, HidBatteryReport? battery)
     {
         using var bitmap = new Bitmap(16, 16);
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.Clear(Color.Transparent);
 
+        using var bodyPath = RoundedRectangle(new Rectangle(1, 3, 12, 10), 2);
         using var bodyBrush = new SolidBrush(Color.White);
         using var outlinePen = new Pen(Color.Black, 1);
-        graphics.FillRectangle(bodyBrush, 2, 4, 12, 8);
-        graphics.DrawRectangle(outlinePen, 2, 4, 12, 8);
-        graphics.FillRectangle(Brushes.Black, 14, 7, 2, 2);
+        graphics.FillPath(bodyBrush, bodyPath);
+        graphics.DrawPath(outlinePen, bodyPath);
+        graphics.FillRectangle(Brushes.Black, 13, 6, 2, 4);
 
-        var level = Math.Clamp(battery ?? 0, 0, 100);
-        var width = level * 10 / 100;
+        var level = Math.Clamp(battery?.Percentage ?? 0, 0, 100);
+        var width = level * 8 / 100;
         var fill = connection == KeyboardConnection.Error || connection == KeyboardConnection.Disconnected
-            ? Brushes.Gray
+            ? Brushes.DimGray
             : level <= 20
-                ? Brushes.Red
+                ? Brushes.IndianRed
                 : level <= 40
                     ? Brushes.Goldenrod
                     : Brushes.ForestGreen;
         graphics.FillRectangle(fill, 3, 5, width, 6);
 
-        if (connection == KeyboardConnection.Wired)
+        if (connection == KeyboardConnection.Wired || battery?.Charging == KeychronChargingState.Charging)
         {
-            graphics.FillRectangle(Brushes.DodgerBlue, 5, 12, 6, 2);
+            var bolt = new[]
+            {
+                new Point(10, 5), new Point(7, 9), new Point(9, 9),
+                new Point(8, 14), new Point(13, 8), new Point(11, 8),
+            };
+            using var boltBrush = new SolidBrush(Color.Gold);
+            using var boltPen = new Pen(Color.Black, 1) { LineJoin = LineJoin.Round };
+            graphics.FillPolygon(boltBrush, bolt);
+            graphics.DrawPolygon(boltPen, bolt);
         }
 
         var handle = bitmap.GetHicon();
@@ -290,5 +356,17 @@ internal static class TrayIcon
         {
             DestroyIcon(handle);
         }
+    }
+
+    private static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)
+    {
+        var diameter = radius * 2;
+        var path = new GraphicsPath();
+        path.AddArc(rectangle.X, rectangle.Y, diameter, diameter, 180, 90);
+        path.AddArc(rectangle.Right - diameter, rectangle.Y, diameter, diameter, 270, 90);
+        path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rectangle.X, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 }

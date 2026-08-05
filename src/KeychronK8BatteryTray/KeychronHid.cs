@@ -48,7 +48,6 @@ internal static class KeychronHid
     private const byte BatteryCommand = 0xA4;
     private const byte AnalogCommand = 0xA9;
     private const byte GetProfilesInfoCommand = 0x10;
-    private const byte K8HeModelId = 2;
     private const int ReportLength = 33;
 
     private static bool _initialized;
@@ -148,6 +147,24 @@ internal static class KeychronHid
             receiverRead.Battery.HasValue || receiverRead.AnalogProfile.HasValue);
     }
 
+    internal static AnalogProfileReport? ReadProfile()
+    {
+        if (!_initialized)
+        {
+            throw new InvalidOperationException("HIDAPI is not initialized.");
+        }
+
+        var wired = FindDevice(WiredProductId);
+        var profile = wired is not null ? ReadProfile(wired.Value) : null;
+        if (profile.HasValue)
+        {
+            return profile;
+        }
+
+        var receiver = FindDevice(ReceiverProductId);
+        return receiver is not null ? ReadProfile(receiver.Value) : null;
+    }
+
     internal static void Shutdown()
     {
         if (_initialized)
@@ -169,6 +186,13 @@ internal static class KeychronHid
             detailed.Value.Charging == KeychronChargingState.Charging &&
             detailed.Value.Transport == KeychronTransport.Usb,
             "detailed battery response");
+
+        var otherModel = ParseBatteryResponse(new byte[] { 0xA4, 0x5C, 0xB0, 0x0F, 0x01, 0x04, 0x07 }, 7);
+        Assert(
+            otherModel.HasValue &&
+            otherModel.Value.Charging == KeychronChargingState.Charging &&
+            otherModel.Value.Transport == KeychronTransport.Wireless24G,
+            "other model battery response");
 
         var profile = ParseAnalogProfileResponse(new byte[] { 0x00, 0xA9, 0x10, 0x02, 0x03 }, 5);
         Assert(profile.HasValue && profile.Value.Index == 2 && profile.Value.Count == 3 && profile.Value.Name == "Gamepad", "analog profile response");
@@ -192,6 +216,25 @@ internal static class KeychronHid
             var battery = ReadBattery(device);
             var profile = ReadAnalogProfile(device);
             return new(battery, profile);
+        }
+        finally
+        {
+            hid_close(device);
+        }
+    }
+
+    private static AnalogProfileReport? ReadProfile(DeviceInfo deviceInfo)
+    {
+        var device = hid_open_path(deviceInfo.Path);
+        if (device == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var response = SendRequest(device, AnalogCommand, GetProfilesInfoCommand);
+            return response.HasValue ? ParseAnalogProfileResponse(response.Value.Data, response.Value.Length) : null;
         }
         finally
         {
@@ -277,9 +320,9 @@ internal static class KeychronHid
             return null;
         }
 
-        // The model byte distinguishes the new K8 HE report from the earlier
-        // A4 report, which only contained the percentage.
-        if (length > offset + 6 && response[offset + 6] == K8HeModelId)
+        // A non-zero model byte marks the extended report. Older firmware only
+        // returns the percentage and leaves the remaining bytes absent.
+        if (length > offset + 6 && response[offset + 6] != 0)
         {
             return new(
                 percentage,

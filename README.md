@@ -1,6 +1,7 @@
-# Keychron K8 HE Battery Tray
+# Keychron Battery Tray
 
-This project provides a small Windows tray app for the Keychron K8 HE.
+This project provides a small Windows tray app for Keychron keyboards.
+The K8 HE is the tested model.
 
 The app reads the battery report from the keyboard. It works in Cable mode
 and through the Keychron Link 2.4 GHz receiver. It does not use Bluetooth or
@@ -12,6 +13,7 @@ the Keychron application.
 - Show the current transport: Wired, 2.4 GHz, or Bluetooth.
 - Show the charge state when the firmware provides it.
 - Show the active HE analog profile by name.
+- Use a color battery icon and a charging bolt for Cable mode or charging.
 - Start with Windows.
 - Use a read-only HID request.
 
@@ -19,8 +21,12 @@ the Keychron application.
 
 - Windows x64.
 - .NET 10 Desktop Runtime.
-- A K8 HE with the wired-aware firmware from this repository.
+- A Keychron keyboard with the wired-aware firmware from this repository.
 - The Keychron Link receiver for 2.4 GHz readings.
+
+The included firmware files are for the K8 HE. Do not flash them to another
+model. See [Patch another model](#patch-another-model) before you build
+firmware for another keyboard.
 
 The app does not need a Bluetooth connection. The firmware reports the
 transport and charge state. Cable mode reports the battery value over the
@@ -64,6 +70,17 @@ Example output:
 WiredPresent=True; Battery=100; Charging=Charging; Transport=Usb; AnalogProfile=Gaming
 ```
 
+The app checks these device IDs:
+
+```text
+Keyboard: 3434:0E80
+Receiver: 3434:D030
+```
+
+If another model uses a different product ID, add the ID in
+`src/KeychronK8BatteryTray/KeychronHid.cs` and build the app again. Do not
+guess a product ID.
+
 The app uses these device values:
 
 | Device | VID | PID | Usage page | Usage |
@@ -101,9 +118,10 @@ The response can have a leading zero report ID. The fields are:
 | `VL VH` | Battery voltage in millivolts, little-endian. The app does not display this field. |
 | `CS` | `0` not charging, `1` charging, `2` full. |
 | `TR` | `1` USB, `2` Bluetooth, `4` 2.4 GHz. |
-| `MI` | Model ID. `2` is the K8 HE. |
+| `MI` | Non-zero model ID. `2` is the K8 HE. |
 
-The request is read-only. It does not change charging or the wireless mode.
+The app accepts any non-zero model ID in the extended report. The request is
+read-only. It does not change charging or the wireless mode.
 
 ### HE profile: `0xA9`
 
@@ -132,13 +150,65 @@ K8 HE reports three profiles. The app uses these names:
 
 | State | Tooltip example |
 | --- | --- |
-| Wired and charging | `K8 HE: 100% - Wired - Charging - Profile: Gaming` |
-| Wired and full | `K8 HE: 100% - Wired - Full - Profile: Gaming` |
-| 2.4 GHz | `K8 HE: 91% - 2.4 GHz - Profile: Default` |
-| Not detected | `K8 HE: Not detected - last seen 91% - Profile: Default` |
+| Wired and charging | `Keychron: 100% - Wired - Charging - Profile: Gaming` |
+| Wired and full | `Keychron: 100% - Wired - Full - Profile: Gaming` |
+| 2.4 GHz | `Keychron: 91% - 2.4 GHz - Profile: Default` |
+| Not detected | `Keychron: Not detected - last seen 91% - Profile: Default` |
 
-The app checks the keyboard once per minute. Moving the pointer over the icon
-can request an earlier check. Use **Refresh now** for an immediate check.
+The app checks battery data once per minute. It checks the active profile with
+an `0xA9` request every two seconds. The profile request does not request
+battery data. Moving the pointer over the icon can request an earlier full
+check. Use **Refresh now** for an immediate full check.
+
+The current firmware does not send a profile-change event. The two-second
+profile check is the lowest-complexity way to keep the tray text current. A
+firmware change could send an event and remove this check.
+
+## Patch another model
+
+The included patch is a K8 HE example. It is not a universal firmware image.
+Use the steps below for another Keychron QMK keyboard with 2.4 GHz support.
+
+1. Confirm that the keyboard uses Keychron QMK common files. It must use the
+   Keychron raw-HID code, wireless battery code, and a raw-HID endpoint.
+2. Save the official firmware. Save the QMK source revision that matches the
+   official firmware. Do not use the K8 HE binary.
+3. Apply the common-file changes from
+   [`keychron-k8-he-battery-wired.patch`](firmware/k8_he_battery_rawhid_wired/keychron-k8-he-battery-wired.patch).
+   Run the commands from the QMK source root. Copy the patch there, or give
+   `git apply` its full path. Check the patch first:
+
+   ```powershell
+   git apply --check --exclude='keyboards/keychron/k8_he/*' keychron-k8-he-battery-wired.patch
+   git apply --exclude='keyboards/keychron/k8_he/*' keychron-k8-he-battery-wired.patch
+   ```
+
+4. Keep the `0xA4` handler in `keychron_raw_hid.c`. Set a non-zero,
+   model-specific `KC_BATTERY_MODEL_ID` in the target keyboard `config.h`.
+   The model ID is metadata. It does not change the battery measurement.
+5. Enable `WIRELESS_RAW_ENABLE` in the target keyboard `rules.mk` when the
+   model needs raw-HID requests over the 2.4 GHz receiver. Do not copy this
+   step if the target already uses the correct option.
+6. Build the target keymap with QMK. Example:
+
+   ```powershell
+   qmk compile -kb keychron/<model> -km <keymap>
+   ```
+
+   Replace `<model>` and `<keymap>` with values for the target keyboard.
+7. Test the new image in Cable mode. Then test the same image through the
+   2.4 GHz receiver. Run `--probe` and confirm the battery, transport, and
+   charge fields.
+8. Flash only the keyboard. Do not flash the Keychron Link receiver. Keep the
+   official image for recovery.
+
+The patch can fail when the QMK source revision is different. Use the exact
+source revision first. If the patch still fails, review each hunk against the
+target model. Do not force a patch that changes unrelated wireless code.
+
+The `0xA9` profile query is optional. It works for HE models that include the
+analog-matrix profile code. Other models can use the battery and transport
+parts of the app without reporting a profile.
 
 ## Firmware files
 
