@@ -29,10 +29,9 @@ internal static class Program
                 Console.WriteLine(
                     $"WiredPresent={result.WiredPresent}; " +
                     $"Battery={battery?.Percentage.ToString() ?? "none"}; " +
-                    $"VoltageMillivolts={battery?.VoltageMillivolts?.ToString() ?? "unknown"}; " +
                     $"Charging={battery?.Charging.ToString() ?? "unknown"}; " +
                     $"Transport={battery?.Transport.ToString() ?? "unknown"}; " +
-                    $"AnalogProfile={(profile.HasValue ? $"{profile.Value.Index + 1}/{profile.Value.Count}" : "unknown")}");
+                    $"AnalogProfile={(profile.HasValue ? profile.Value.Name : "unknown")}");
             }
             finally
             {

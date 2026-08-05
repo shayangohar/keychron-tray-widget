@@ -10,8 +10,8 @@ the Keychron application.
 
 - Show the battery percentage when you point to the tray icon.
 - Show the current transport: Wired, 2.4 GHz, or Bluetooth.
-- Show the voltage and charge state when the firmware provides them.
-- Show the active HE analog profile as `HE profile N/3`.
+- Show the charge state when the firmware provides it.
+- Show the active HE analog profile by name.
 - Start with Windows.
 - Use a read-only HID request.
 
@@ -61,7 +61,7 @@ publish/KeychronK8BatteryTray.exe --probe
 Example output:
 
 ```text
-WiredPresent=True; Battery=100; VoltageMillivolts=4172; Charging=Charging; Transport=Usb; AnalogProfile=2/3
+WiredPresent=True; Battery=100; Charging=Charging; Transport=Usb; AnalogProfile=Gaming
 ```
 
 The app uses these device values:
@@ -98,7 +98,7 @@ The response can have a leading zero report ID. The fields are:
 | Field | Meaning |
 | --- | --- |
 | `PP` | Battery percentage, from 0 to 100. |
-| `VL VH` | Battery voltage in millivolts, little-endian. |
+| `VL VH` | Battery voltage in millivolts, little-endian. The app does not display this field. |
 | `CS` | `0` not charging, `1` charging, `2` full. |
 | `TR` | `1` USB, `2` Bluetooth, `4` 2.4 GHz. |
 | `MI` | Model ID. `2` is the K8 HE. |
@@ -120,17 +120,22 @@ A9 10 PI PC 00 ... 00
 ```
 
 `PI` is the zero-based active profile index. `PC` is the profile count. The
-K8 HE reports three profiles. The app shows the index as `PI + 1`, for
-example `HE profile 2/3`.
+K8 HE reports three profiles. The app uses these names:
+
+| Index | Name |
+| ---: | --- |
+| `0` | Default |
+| `1` | Gaming |
+| `2` | Gamepad |
 
 ## Tray states
 
 | State | Tooltip example |
 | --- | --- |
-| Wired and charging | `K8 HE: 100% - Wired - 4172 mV - Charging - HE profile 2/3` |
-| Wired and full | `K8 HE: 100% - Wired - 4172 mV - Full - HE profile 2/3` |
-| 2.4 GHz | `K8 HE: 91% - 2.4 GHz - 4020 mV - HE profile 1/3` |
-| Not detected | `K8 HE: Not detected - last seen 91% - HE profile 1/3` |
+| Wired and charging | `K8 HE: 100% - Wired - Charging - Profile: Gaming` |
+| Wired and full | `K8 HE: 100% - Wired - Full - Profile: Gaming` |
+| 2.4 GHz | `K8 HE: 91% - 2.4 GHz - Profile: Default` |
+| Not detected | `K8 HE: Not detected - last seen 91% - Profile: Default` |
 
 The app checks the keyboard once per minute. Moving the pointer over the icon
 can request an earlier check. Use **Refresh now** for an immediate check.

@@ -18,11 +18,19 @@ internal enum KeychronChargingState
 
 internal readonly record struct HidBatteryReport(
     int Percentage,
-    int? VoltageMillivolts,
     KeychronChargingState Charging,
     KeychronTransport Transport);
 
-internal readonly record struct AnalogProfileReport(int Index, int Count);
+internal readonly record struct AnalogProfileReport(int Index, int Count)
+{
+    internal string Name => Index switch
+    {
+        0 => "Default",
+        1 => "Gaming",
+        2 => "Gamepad",
+        _ => $"Profile {Index + 1}",
+    };
+}
 
 internal readonly record struct HidReadResult(
     bool WiredPresent,
@@ -152,19 +160,18 @@ internal static class KeychronHid
     internal static void RunSelfTest()
     {
         var basic = ParseBatteryResponse(new byte[] { 0xA4, 0x5B }, 2);
-        Assert(basic.HasValue && basic.Value.Percentage == 91 && basic.Value.VoltageMillivolts is null, "short battery response");
+        Assert(basic.HasValue && basic.Value.Percentage == 91, "short battery response");
 
         var detailed = ParseBatteryResponse(new byte[] { 0x00, 0xA4, 0x5C, 0xB0, 0x0F, 0x01, 0x01, 0x02 }, 8);
         Assert(
             detailed.HasValue &&
             detailed.Value.Percentage == 92 &&
-            detailed.Value.VoltageMillivolts == 4016 &&
             detailed.Value.Charging == KeychronChargingState.Charging &&
             detailed.Value.Transport == KeychronTransport.Usb,
             "detailed battery response");
 
         var profile = ParseAnalogProfileResponse(new byte[] { 0x00, 0xA9, 0x10, 0x02, 0x03 }, 5);
-        Assert(profile.HasValue && profile.Value.Index == 2 && profile.Value.Count == 3, "analog profile response");
+        Assert(profile.HasValue && profile.Value.Index == 2 && profile.Value.Count == 3 && profile.Value.Name == "Gamepad", "analog profile response");
 
         Assert(ParseBatteryResponse(new byte[] { 0xA4, 0x65 }, 2) is null, "invalid percentage");
         Assert(ParseBatteryResponse(new byte[] { 0xA3, 0x5B }, 2) is null, "invalid battery command");
@@ -274,15 +281,13 @@ internal static class KeychronHid
         // A4 report, which only contained the percentage.
         if (length > offset + 6 && response[offset + 6] == K8HeModelId)
         {
-            var voltage = response[offset + 2] | (response[offset + 3] << 8);
             return new(
                 percentage,
-                voltage,
                 ParseChargingState(response[offset + 4]),
                 ParseTransport(response[offset + 5]));
         }
 
-        return new(percentage, null, KeychronChargingState.Unknown, KeychronTransport.Unknown);
+        return new(percentage, KeychronChargingState.Unknown, KeychronTransport.Unknown);
     }
 
     private static AnalogProfileReport? ParseAnalogProfileResponse(byte[] response, int length)

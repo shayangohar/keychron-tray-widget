@@ -160,11 +160,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         var detail = $"{battery.Percentage}% - {TransportName(connection)}";
-        if (battery.VoltageMillivolts is { } voltage)
-        {
-            detail += $" - {voltage} mV";
-        }
-
         var charging = battery.Charging switch
         {
             KeychronChargingState.Charging => "Charging",
@@ -189,7 +184,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     };
 
     private static string FormatProfile(AnalogProfileReport? profile) => profile is { } value
-        ? $" - HE profile {value.Index + 1}/{value.Count}"
+        ? $" - Profile: {value.Name}"
         : string.Empty;
 
     private void Apply(KeyboardConnection connection, HidBatteryReport? battery, string detail)
