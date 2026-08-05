@@ -47,6 +47,17 @@ dotnet publish src/KeychronK8BatteryTray/KeychronK8BatteryTray.csproj -c Release
 Keep `KeychronK8BatteryTray.exe` and `hidapi.dll` in the same folder.
 Right-click the tray icon and select **Start with Windows**.
 
+## Icon assets
+
+The app embeds 16×16 monochrome ICO files. It has no runtime SVG dependency.
+The source SVG files are in `assets/lucide`.
+
+To regenerate the ICO files on Windows, run:
+
+```powershell
+.\tools\GenerateLucideIcons.ps1
+```
+
 ## Check the connection
 
 Run:

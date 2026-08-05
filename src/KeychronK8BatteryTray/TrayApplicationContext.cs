@@ -1,7 +1,6 @@
 using Microsoft.Win32;
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Windows.Forms;
 
 internal enum KeyboardConnection
@@ -341,68 +340,50 @@ internal static class Autostart
 
 internal static class TrayIcon
 {
-    [DllImport("user32.dll")]
-    private static extern bool DestroyIcon(IntPtr handle);
+    private static readonly IReadOnlyDictionary<string, Icon> Templates = LoadTemplates();
 
     internal static Icon Create(KeyboardConnection connection, HidBatteryReport? battery)
     {
-        using var bitmap = new Bitmap(16, 16);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        graphics.Clear(Color.Transparent);
-
-        using var bodyPath = RoundedRectangle(new Rectangle(1, 3, 12, 10), 2);
-        using var bodyBrush = new SolidBrush(Color.White);
-        using var outlinePen = new Pen(Color.Black, 1);
-        graphics.FillPath(bodyBrush, bodyPath);
-        graphics.DrawPath(outlinePen, bodyPath);
-        graphics.FillRectangle(Brushes.Black, 13, 6, 2, 4);
-
-        var level = Math.Clamp(battery?.Percentage ?? 0, 0, 100);
-        var width = level * 8 / 100;
-        var fill = connection == KeyboardConnection.Error || connection == KeyboardConnection.Disconnected
-            ? Brushes.DimGray
-            : level <= 20
-                ? Brushes.IndianRed
-                : level <= 40
-                    ? Brushes.Goldenrod
-                    : Brushes.ForestGreen;
-        graphics.FillRectangle(fill, 3, 5, width, 6);
-
-        if (connection == KeyboardConnection.Wired || battery?.Charging == KeychronChargingState.Charging)
+        var name = connection switch
         {
-            var bolt = new[]
-            {
-                new Point(10, 5), new Point(7, 9), new Point(9, 9),
-                new Point(8, 14), new Point(13, 8), new Point(11, 8),
-            };
-            using var boltBrush = new SolidBrush(Color.Gold);
-            using var boltPen = new Pen(Color.Black, 1) { LineJoin = LineJoin.Round };
-            graphics.FillPolygon(boltBrush, bolt);
-            graphics.DrawPolygon(boltPen, bolt);
-        }
+            KeyboardConnection.Wired => "battery-charging",
+            KeyboardConnection.Error or KeyboardConnection.Disconnected => "unplug",
+            _ when battery is null => "unplug",
+            _ when battery.Value.Charging == KeychronChargingState.Charging => "battery-charging",
+            _ => BatteryIconName(battery.Value.Percentage),
+        };
 
-        var handle = bitmap.GetHicon();
-        try
-        {
-            using var source = Icon.FromHandle(handle);
-            return (Icon)source.Clone();
-        }
-        finally
-        {
-            DestroyIcon(handle);
-        }
+        return (Icon)Templates[name].Clone();
     }
 
-    private static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)
+    private static string BatteryIconName(int percentage) => Math.Clamp(percentage, 0, 100) switch
     {
-        var diameter = radius * 2;
-        var path = new GraphicsPath();
-        path.AddArc(rectangle.X, rectangle.Y, diameter, diameter, 180, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Y, diameter, diameter, 270, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(rectangle.X, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        return path;
+        >= 75 => "battery-full",
+        >= 40 => "battery-medium",
+        > 20 => "battery-low",
+        _ => "battery-warning",
+    };
+
+    private static IReadOnlyDictionary<string, Icon> LoadTemplates()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var names = new[]
+        {
+            "battery-full",
+            "battery-medium",
+            "battery-low",
+            "battery-warning",
+            "battery-charging",
+            "unplug",
+        };
+
+        return names.ToDictionary(name => name, name =>
+        {
+            var resourceName = $"KeychronK8BatteryTray.Icons.{name}.ico";
+            using var stream = assembly.GetManifestResourceStream(resourceName)
+                ?? throw new InvalidOperationException($"Missing tray icon resource: {resourceName}");
+            using var source = new Icon(stream);
+            return (Icon)source.Clone();
+        });
     }
 }

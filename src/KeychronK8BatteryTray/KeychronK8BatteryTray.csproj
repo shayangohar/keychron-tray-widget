@@ -13,5 +13,6 @@
 
   <ItemGroup>
     <None Include="native\hidapi.dll" CopyToOutputDirectory="PreserveNewest" Link="hidapi.dll" />
+    <EmbeddedResource Include="icons\*.ico" LogicalName="KeychronK8BatteryTray.Icons.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>
