@@ -49,7 +49,8 @@ Right-click the tray icon and select **Start with Windows**.
 
 ## Icon assets
 
-The app embeds 16×16 monochrome ICO files. It has no runtime SVG dependency.
+The app embeds monochrome ICO files with 16–64 pixel sizes. It has no runtime
+SVG dependency.
 The source SVG files are in `assets/lucide`.
 
 To regenerate the ICO files on Windows, run:
