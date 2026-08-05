@@ -19,7 +19,7 @@ It does not use Bluetooth or the Keychron web launcher.
 ## Features
 
 - Shows battery percentage when you point to the tray icon.
-- Shows Cable mode, 2.4 GHz mode, or Bluetooth mode.
+- Shows Cable mode or 2.4 GHz mode (it can maybe show Bluetooth but I didn't really bother because when on Bluetooth it reports battery life natively)
 - Shows charging state when the firmware provides it.
 - Shows the active HE profile: Default, Gaming, or Gamepad.
 - Starts with Windows.
@@ -34,8 +34,6 @@ It does not use Bluetooth or the Keychron web launcher.
 - A QMK-based Keychron keyboard with wireless 2.4 GHz support.
 - The required custom firmware patch.
 - A Keychron Link receiver for 2.4 GHz mode.
-
-Bluetooth is not required, but the tray icon will identify if it is connected via Bluetooth. 
 
 ## Build and run
 
