@@ -24,6 +24,9 @@ It does not use Bluetooth or the Keychron web launcher.
 - Shows the active HE profile: Default, Gaming, or Gamepad.
 - Starts with Windows.
 
+  <img width="533" height="137" alt="image" src="https://github.com/user-attachments/assets/70af5089-f15c-43b2-9945-78027f969c7c" />
+
+
 ## Requirements
 
 - Windows x64.
