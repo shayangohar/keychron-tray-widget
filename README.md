@@ -35,7 +35,7 @@ It does not use Bluetooth or the Keychron web launcher.
 - The required custom firmware patch.
 - A Keychron Link receiver for 2.4 GHz mode.
 
-The receiver is not needed for Cable mode. Bluetooth is not required.
+Bluetooth is not required, but the tray icon will identify if it is connected via Bluetooth. 
 
 ## Build and run
 
