@@ -155,14 +155,18 @@ K8 HE reports three profiles. The app uses these names:
 | 2.4 GHz | `Keychron: 91% - 2.4 GHz - Profile: Default` |
 | Not detected | `Keychron: Not detected - last seen 91% - Profile: Default` |
 
-The app checks battery data once per minute. It checks the active profile with
-an `0xA9` request every two seconds. The profile request does not request
-battery data. Moving the pointer over the icon can request an earlier full
-check. Use **Refresh now** for an immediate full check.
+The app checks battery data once per minute. The normal profile check also
+runs once per minute as part of that full check. When the pointer moves over
+the tray icon, the app sends an `0xA9` profile-only request once per second for
+15 seconds after the last mouse movement. This request does not request
+battery data. Moving the pointer
+over the icon can also request an earlier full check. Use **Refresh now** for
+an immediate full check.
 
-The current firmware does not send a profile-change event. The two-second
-profile check is the lowest-complexity way to keep the tray text current. A
-firmware change could send an event and remove this check.
+`NotifyIcon` does not provide a reliable mouse-leave event. The app therefore
+uses the 15-second window as the hover session. The current firmware does not
+send a profile-change event. A firmware change could send an event and remove
+this timer.
 
 ## Patch another model
 

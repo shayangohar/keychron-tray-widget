@@ -16,7 +16,7 @@ internal enum KeyboardConnection
 internal sealed class TrayApplicationContext : ApplicationContext
 {
     private static readonly TimeSpan PollPeriod = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan ProfilePollPeriod = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan HoverProfilePollPeriod = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan HoverRefreshPeriod = TimeSpan.FromSeconds(15);
 
     private readonly NotifyIcon _notifyIcon;
@@ -27,6 +27,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly SemaphoreSlim _pollGate = new(1, 1);
     private Icon? _currentIcon;
     private DateTime _lastHoverPoll = DateTime.MinValue;
+    private DateTime _lastHoverMove = DateTime.MinValue;
+    private TimeSpan _currentProfilePollPeriod = Timeout.InfiniteTimeSpan;
     private HidBatteryReport? _lastBattery;
     private AnalogProfileReport? _lastAnalogProfile;
     private KeyboardConnection _lastConnection = KeyboardConnection.Disconnected;
@@ -63,7 +65,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.MouseMove += OnMouseMove;
 
         _pollTimer = new System.Threading.Timer(_ => _ = PollAsync(), null, Timeout.Infinite, Timeout.Infinite);
-        _profileTimer = new System.Threading.Timer(_ => _ = PollProfileAsync(), null, Timeout.Infinite, Timeout.Infinite);
+        _profileTimer = new System.Threading.Timer(_ => OnProfileTimerTick(), null, Timeout.Infinite, Timeout.Infinite);
 
         if (!KeychronHid.TryInitialize(out var error))
         {
@@ -72,12 +74,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _pollTimer.Change(TimeSpan.Zero, PollPeriod);
-        _profileTimer.Change(ProfilePollPeriod, ProfilePollPeriod);
     }
 
     private void OnMouseMove(object? sender, MouseEventArgs args)
     {
         var now = DateTime.UtcNow;
+        _lastHoverMove = now;
+        SetProfilePollPeriod(HoverProfilePollPeriod, immediate: true);
+
         if (now - _lastHoverPoll < HoverRefreshPeriod)
         {
             return;
@@ -85,6 +89,38 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _lastHoverPoll = now;
         _ = PollAsync();
+    }
+
+    private void OnProfileTimerTick()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastHoverMove > HoverRefreshPeriod)
+        {
+            SetProfilePollPeriod(Timeout.InfiniteTimeSpan, immediate: false);
+            return;
+        }
+
+        _ = PollProfileAsync();
+    }
+
+    private void SetProfilePollPeriod(TimeSpan period, bool immediate)
+    {
+        if (_currentProfilePollPeriod == period)
+        {
+            return;
+        }
+
+        _currentProfilePollPeriod = period;
+        var dueTime = period == Timeout.InfiniteTimeSpan
+            ? Timeout.InfiniteTimeSpan
+            : immediate
+                ? TimeSpan.Zero
+                : period;
+        _profileTimer.Change(dueTime, period);
     }
 
     private async Task PollAsync()
