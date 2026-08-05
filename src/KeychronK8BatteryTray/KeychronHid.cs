@@ -1,6 +1,34 @@
 using System.Runtime.InteropServices;
 
-internal readonly record struct HidReadResult(bool WiredPresent, int? WirelessBattery);
+internal enum KeychronTransport
+{
+    Unknown,
+    Usb,
+    Bluetooth,
+    Wireless24G,
+}
+
+internal enum KeychronChargingState
+{
+    Unknown,
+    NotCharging,
+    Charging,
+    Full,
+}
+
+internal readonly record struct HidBatteryReport(
+    int Percentage,
+    int? VoltageMillivolts,
+    KeychronChargingState Charging,
+    KeychronTransport Transport);
+
+internal readonly record struct AnalogProfileReport(int Index, int Count);
+
+internal readonly record struct HidReadResult(
+    bool WiredPresent,
+    HidBatteryReport? Battery,
+    AnalogProfileReport? AnalogProfile,
+    bool ReceiverUsed);
 
 internal static class KeychronHid
 {
@@ -10,6 +38,10 @@ internal static class KeychronHid
     private const ushort RawUsagePage = 0xFF60;
     private const ushort RawUsage = 0x0061;
     private const byte BatteryCommand = 0xA4;
+    private const byte AnalogCommand = 0xA9;
+    private const byte GetProfilesInfoCommand = 0x10;
+    private const byte K8HeModelId = 2;
+    private const int ReportLength = 33;
 
     private static bool _initialized;
 
@@ -29,7 +61,11 @@ internal static class KeychronHid
         public IntPtr Next;
     }
 
-    private readonly record struct DeviceInfo(string Path, ushort UsagePage, ushort Usage);
+    private readonly record struct DeviceInfo(string Path);
+    private readonly record struct HidResponse(byte[] Data, int Length);
+    private readonly record struct DeviceReadResult(
+        HidBatteryReport? Battery,
+        AnalogProfileReport? AnalogProfile);
 
     [DllImport("hidapi", CallingConvention = CallingConvention.Cdecl)]
     private static extern int hid_init();
@@ -85,9 +121,23 @@ internal static class KeychronHid
             throw new InvalidOperationException("HIDAPI is not initialized.");
         }
 
-        var wired = FindDevice(WiredProductId) is not null;
-        var wirelessBattery = ReadWirelessBattery();
-        return new HidReadResult(wired, wirelessBattery);
+        var wired = FindDevice(WiredProductId);
+        var wiredRead = wired is not null ? ReadDevice(wired.Value) : default;
+
+        // Prefer the direct keyboard endpoint. It works in Cable mode and also
+        // reports the current transport when the USB cable only supplies power.
+        if (wiredRead.Battery.HasValue)
+        {
+            return new(wired is not null, wiredRead.Battery, wiredRead.AnalogProfile, false);
+        }
+
+        var receiver = FindDevice(ReceiverProductId);
+        var receiverRead = receiver is not null ? ReadDevice(receiver.Value) : default;
+        return new(
+            wired is not null,
+            receiverRead.Battery,
+            wiredRead.AnalogProfile ?? receiverRead.AnalogProfile,
+            receiverRead.Battery.HasValue || receiverRead.AnalogProfile.HasValue);
     }
 
     internal static void Shutdown()
@@ -101,44 +151,76 @@ internal static class KeychronHid
 
     internal static void RunSelfTest()
     {
-        Assert(ParseBatteryResponse(new byte[] { 0xA4, 0x5B }, 2) == 91, "short response");
-        Assert(ParseBatteryResponse(new byte[] { 0x00, 0xA4, 0x5C }, 3) == 92, "report-id response");
+        var basic = ParseBatteryResponse(new byte[] { 0xA4, 0x5B }, 2);
+        Assert(basic.HasValue && basic.Value.Percentage == 91 && basic.Value.VoltageMillivolts is null, "short battery response");
+
+        var detailed = ParseBatteryResponse(new byte[] { 0x00, 0xA4, 0x5C, 0xB0, 0x0F, 0x01, 0x01, 0x02 }, 8);
+        Assert(
+            detailed.HasValue &&
+            detailed.Value.Percentage == 92 &&
+            detailed.Value.VoltageMillivolts == 4016 &&
+            detailed.Value.Charging == KeychronChargingState.Charging &&
+            detailed.Value.Transport == KeychronTransport.Usb,
+            "detailed battery response");
+
+        var profile = ParseAnalogProfileResponse(new byte[] { 0x00, 0xA9, 0x10, 0x02, 0x03 }, 5);
+        Assert(profile.HasValue && profile.Value.Index == 2 && profile.Value.Count == 3, "analog profile response");
+
         Assert(ParseBatteryResponse(new byte[] { 0xA4, 0x65 }, 2) is null, "invalid percentage");
-        Assert(ParseBatteryResponse(new byte[] { 0xA3, 0x5B }, 2) is null, "invalid command");
-        Console.WriteLine("Battery response parser self-test passed.");
+        Assert(ParseBatteryResponse(new byte[] { 0xA3, 0x5B }, 2) is null, "invalid battery command");
+        Assert(ParseAnalogProfileResponse(new byte[] { 0xA9, 0x11, 0x02, 0x03 }, 4) is null, "invalid analog command");
+        Console.WriteLine("HID protocol parser self-test passed.");
     }
 
-    private static int? ReadWirelessBattery()
+    private static DeviceReadResult ReadDevice(DeviceInfo deviceInfo)
     {
-        var deviceInfo = FindDevice(ReceiverProductId);
-        if (deviceInfo is null)
-        {
-            return null;
-        }
-
-        var device = hid_open_path(deviceInfo.Value.Path);
+        var device = hid_open_path(deviceInfo.Path);
         if (device == IntPtr.Zero)
         {
-            return null;
+            return default;
         }
 
         try
         {
-            var request = new byte[33];
-            request[1] = BatteryCommand;
-            if (hid_write(device, request, (UIntPtr)request.Length) < 0)
-            {
-                return null;
-            }
-
-            var response = new byte[33];
-            var length = hid_read_timeout(device, response, (UIntPtr)response.Length, 1000);
-            return length > 0 ? ParseBatteryResponse(response, length) : null;
+            var battery = ReadBattery(device);
+            var profile = ReadAnalogProfile(device);
+            return new(battery, profile);
         }
         finally
         {
             hid_close(device);
         }
+    }
+
+    private static HidBatteryReport? ReadBattery(IntPtr device)
+    {
+        var response = SendRequest(device, BatteryCommand);
+        return response.HasValue ? ParseBatteryResponse(response.Value.Data, response.Value.Length) : null;
+    }
+
+    private static AnalogProfileReport? ReadAnalogProfile(IntPtr device)
+    {
+        var response = SendRequest(device, AnalogCommand, GetProfilesInfoCommand);
+        return response.HasValue ? ParseAnalogProfileResponse(response.Value.Data, response.Value.Length) : null;
+    }
+
+    private static HidResponse? SendRequest(IntPtr device, byte command, byte subcommand = 0)
+    {
+        var request = new byte[ReportLength];
+        request[1] = command;
+        if (subcommand != 0)
+        {
+            request[2] = subcommand;
+        }
+
+        if (hid_write(device, request, (UIntPtr)request.Length) < 0)
+        {
+            return null;
+        }
+
+        var response = new byte[ReportLength];
+        var length = hid_read_timeout(device, response, (UIntPtr)response.Length, 1000);
+        return length > 0 ? new HidResponse(response, length) : null;
     }
 
     private static DeviceInfo? FindDevice(ushort productId)
@@ -159,7 +241,7 @@ internal static class KeychronHid
                     var path = Marshal.PtrToStringAnsi(native.Path);
                     if (!string.IsNullOrWhiteSpace(path))
                     {
-                        return new DeviceInfo(path, native.UsagePage, native.Usage);
+                        return new DeviceInfo(path);
                     }
                 }
 
@@ -174,20 +256,73 @@ internal static class KeychronHid
         }
     }
 
-    private static int? ParseBatteryResponse(byte[] response, int length)
+    private static HidBatteryReport? ParseBatteryResponse(byte[] response, int length)
     {
-        if (length >= 3 && response[0] == 0 && response[1] == BatteryCommand)
+        var offset = FindCommand(response, length, BatteryCommand);
+        if (offset < 0 || length <= offset + 1)
         {
-            return response[2] <= 100 ? response[2] : null;
+            return null;
         }
 
-        if (length >= 2 && response[0] == BatteryCommand)
+        var percentage = response[offset + 1];
+        if (percentage > 100)
         {
-            return response[1] <= 100 ? response[1] : null;
+            return null;
         }
 
-        return null;
+        // The model byte distinguishes the new K8 HE report from the earlier
+        // A4 report, which only contained the percentage.
+        if (length > offset + 6 && response[offset + 6] == K8HeModelId)
+        {
+            var voltage = response[offset + 2] | (response[offset + 3] << 8);
+            return new(
+                percentage,
+                voltage,
+                ParseChargingState(response[offset + 4]),
+                ParseTransport(response[offset + 5]));
+        }
+
+        return new(percentage, null, KeychronChargingState.Unknown, KeychronTransport.Unknown);
     }
+
+    private static AnalogProfileReport? ParseAnalogProfileResponse(byte[] response, int length)
+    {
+        var offset = FindCommand(response, length, AnalogCommand);
+        if (offset < 0 || length <= offset + 3 || response[offset + 1] != GetProfilesInfoCommand)
+        {
+            return null;
+        }
+
+        var index = response[offset + 2];
+        var count = response[offset + 3];
+        return count > 0 && index < count ? new AnalogProfileReport(index, count) : null;
+    }
+
+    private static int FindCommand(byte[] response, int length, byte command)
+    {
+        if (length >= 2 && response[0] == 0 && response[1] == command)
+        {
+            return 1;
+        }
+
+        return length >= 1 && response[0] == command ? 0 : -1;
+    }
+
+    private static KeychronChargingState ParseChargingState(byte value) => value switch
+    {
+        0 => KeychronChargingState.NotCharging,
+        1 => KeychronChargingState.Charging,
+        2 => KeychronChargingState.Full,
+        _ => KeychronChargingState.Unknown,
+    };
+
+    private static KeychronTransport ParseTransport(byte value) => value switch
+    {
+        1 => KeychronTransport.Usb,
+        2 => KeychronTransport.Bluetooth,
+        4 => KeychronTransport.Wireless24G,
+        _ => KeychronTransport.Unknown,
+    };
 
     private static void Assert(bool condition, string name)
     {

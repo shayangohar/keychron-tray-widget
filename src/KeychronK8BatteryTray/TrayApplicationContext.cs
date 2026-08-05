@@ -8,6 +8,7 @@ internal enum KeyboardConnection
 {
     Wireless,
     Wired,
+    Bluetooth,
     Disconnected,
     Error,
 }
@@ -24,7 +25,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly SemaphoreSlim _pollGate = new(1, 1);
     private Icon? _currentIcon;
     private DateTime _lastHoverPoll = DateTime.MinValue;
-    private int? _lastBattery;
+    private HidBatteryReport? _lastBattery;
+    private AnalogProfileReport? _lastAnalogProfile;
     private bool _disposed;
 
     internal TrayApplicationContext()
@@ -33,7 +35,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Visible = true,
-            Text = "Keychron K8 HE: checking",
+            Text = "K8 HE: checking",
         };
 
         var menu = new ContextMenuStrip();
@@ -95,30 +97,22 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 return;
             }
 
-            var connection = result.WirelessBattery.HasValue
-                ? KeyboardConnection.Wireless
-                : result.WiredPresent
-                    ? KeyboardConnection.Wired
-                    : KeyboardConnection.Disconnected;
-
-            var detail = connection switch
-            {
-                KeyboardConnection.Wireless when result.WiredPresent =>
-                    $"{result.WirelessBattery}% - 2.4 GHz - USB power",
-                KeyboardConnection.Wireless => $"{result.WirelessBattery}% - 2.4 GHz",
-                KeyboardConnection.Wired => "Wired - USB power",
-                _ when _lastBattery.HasValue => $"Not detected - last seen {_lastBattery}%",
-                _ => "Not detected",
-            };
+            var connection = GetConnection(result);
+            var detail = FormatDetail(connection, result);
 
             _uiContext.Post(_ =>
             {
-                if (result.WirelessBattery.HasValue)
+                if (result.Battery.HasValue)
                 {
-                    _lastBattery = result.WirelessBattery;
+                    _lastBattery = result.Battery;
                 }
 
-                Apply(connection, result.WirelessBattery, detail);
+                if (result.AnalogProfile.HasValue)
+                {
+                    _lastAnalogProfile = result.AnalogProfile;
+                }
+
+                Apply(connection, result.Battery, detail);
             }, null);
         }
         catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or EntryPointNotFoundException)
@@ -134,12 +128,76 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void Apply(KeyboardConnection connection, int? battery, string detail)
+    private static KeyboardConnection GetConnection(HidReadResult result)
     {
-        var tooltip = $"Keychron K8 HE: {detail}";
+        if (result.Battery is { } battery)
+        {
+            return battery.Transport switch
+            {
+                KeychronTransport.Usb => KeyboardConnection.Wired,
+                KeychronTransport.Wireless24G => KeyboardConnection.Wireless,
+                KeychronTransport.Bluetooth => KeyboardConnection.Bluetooth,
+                _ when result.ReceiverUsed => KeyboardConnection.Wireless,
+                _ when result.WiredPresent => KeyboardConnection.Wired,
+                _ => KeyboardConnection.Wireless,
+            };
+        }
+
+        return result.ReceiverUsed
+            ? KeyboardConnection.Wireless
+            : result.WiredPresent
+                ? KeyboardConnection.Wired
+                : KeyboardConnection.Disconnected;
+    }
+
+    private string FormatDetail(KeyboardConnection connection, HidReadResult result)
+    {
+        if (result.Battery is not { } battery)
+        {
+            return _lastBattery is { } last
+                ? $"Not detected - last seen {last.Percentage}%{FormatProfile(_lastAnalogProfile)}"
+                : "Not detected";
+        }
+
+        var detail = $"{battery.Percentage}% - {TransportName(connection)}";
+        if (battery.VoltageMillivolts is { } voltage)
+        {
+            detail += $" - {voltage} mV";
+        }
+
+        var charging = battery.Charging switch
+        {
+            KeychronChargingState.Charging => "Charging",
+            KeychronChargingState.Full => "Full",
+            KeychronChargingState.NotCharging when connection == KeyboardConnection.Wired => "Not charging",
+            _ => null,
+        };
+        if (charging is not null)
+        {
+            detail += $" - {charging}";
+        }
+
+        detail += FormatProfile(result.AnalogProfile);
+        return detail;
+    }
+
+    private static string TransportName(KeyboardConnection connection) => connection switch
+    {
+        KeyboardConnection.Wired => "Wired",
+        KeyboardConnection.Bluetooth => "Bluetooth",
+        _ => "2.4 GHz",
+    };
+
+    private static string FormatProfile(AnalogProfileReport? profile) => profile is { } value
+        ? $" - HE profile {value.Index + 1}/{value.Count}"
+        : string.Empty;
+
+    private void Apply(KeyboardConnection connection, HidBatteryReport? battery, string detail)
+    {
+        var tooltip = $"K8 HE: {detail}";
         _notifyIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
 
-        var newIcon = TrayIcon.Create(connection, battery ?? _lastBattery);
+        var newIcon = TrayIcon.Create(connection, battery?.Percentage ?? _lastBattery?.Percentage);
         var oldIcon = _currentIcon;
         _currentIcon = newIcon;
         _notifyIcon.Icon = newIcon;

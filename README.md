@@ -2,27 +2,29 @@
 
 This project provides a small Windows tray app for the Keychron K8 HE.
 
-The app reads the keyboard battery level over the Keychron Link 2.4 GHz
-receiver. It also detects the direct USB keyboard connection.
+The app reads the battery report from the keyboard. It works in Cable mode
+and through the Keychron Link 2.4 GHz receiver. It does not use Bluetooth or
+the Keychron application.
 
 ## Features
 
-- Show the battery level in the tray tooltip.
-- Show the 2.4 GHz or wired state.
-- Show USB power when the keyboard is wired.
+- Show the battery percentage when you point to the tray icon.
+- Show the current transport: Wired, 2.4 GHz, or Bluetooth.
+- Show the voltage and charge state when the firmware provides them.
+- Show the active HE analog profile as `HE profile N/3`.
 - Start with Windows.
-- Use no Keychron app or Bluetooth connection.
+- Use a read-only HID request.
 
 ## Requirements
 
 - Windows x64.
 - .NET 10 Desktop Runtime.
-- A K8 HE with the custom firmware in this repository.
+- A K8 HE with the wired-aware firmware from this repository.
 - The Keychron Link receiver for 2.4 GHz readings.
 
-The app does not report charge current. It uses the direct USB connection as
-the USB power signal. A wired keyboard can be full, so this signal does not
-prove that the battery is still charging.
+The app does not need a Bluetooth connection. The firmware reports the
+transport and charge state. Cable mode reports the battery value over the
+direct USB HID endpoint.
 
 ## Build
 
@@ -34,8 +36,8 @@ dotnet run --project src/KeychronK8BatteryTray/KeychronK8BatteryTray.csproj -c R
 dotnet publish src/KeychronK8BatteryTray/KeychronK8BatteryTray.csproj -c Release -r win-x64 --self-contained false -o publish
 ```
 
-The publish folder contains the app and `hidapi.dll`. Keep these files in the
-same folder.
+The `publish` folder contains the app and `hidapi.dll`. Keep these files in
+the same folder.
 
 Run the app from a stable folder, such as:
 
@@ -59,7 +61,7 @@ publish/KeychronK8BatteryTray.exe --probe
 Example output:
 
 ```text
-WiredPresent=False; WirelessBattery=91
+WiredPresent=True; Battery=100; VoltageMillivolts=4172; Charging=Charging; Transport=Usb; AnalogProfile=2/3
 ```
 
 The app uses these device values:
@@ -69,53 +71,93 @@ The app uses these device values:
 | K8 HE over USB | `3434` | `0E80` | `FF60` | `61` |
 | Keychron Link receiver | `3434` | `D030` | `FF60` | `61` |
 
-The battery request is a 33-byte HID report:
+The app checks the direct USB endpoint first. If it does not return a report,
+the app checks the receiver.
+
+## HID commands
+
+The wired-aware firmware accepts a 33-byte HID report. The first byte is the
+report ID used by HIDAPI.
+
+### Battery: `0xA4`
+
+Request:
 
 ```text
-request:  00 A4 00 00 ... 00
-response: A4 PP 00 00 ... 00
+00 A4 00 00 ... 00
 ```
 
-`PP` is a value from 0 to 100. The response can also include a leading zero
-report ID. The app accepts both response forms.
+Response:
 
-The query is read-only. It returns the firmware's cached battery value. The
-firmware updates this value during wireless operation.
+```text
+A4 PP VL VH CS TR MI 00 ... 00
+```
+
+The response can have a leading zero report ID. The fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `PP` | Battery percentage, from 0 to 100. |
+| `VL VH` | Battery voltage in millivolts, little-endian. |
+| `CS` | `0` not charging, `1` charging, `2` full. |
+| `TR` | `1` USB, `2` Bluetooth, `4` 2.4 GHz. |
+| `MI` | Model ID. `2` is the K8 HE. |
+
+The request is read-only. It does not change charging or the wireless mode.
+
+### HE profile: `0xA9`
+
+Request:
+
+```text
+00 A9 10 00 ... 00
+```
+
+Response:
+
+```text
+A9 10 PI PC 00 ... 00
+```
+
+`PI` is the zero-based active profile index. `PC` is the profile count. The
+K8 HE reports three profiles. The app shows the index as `PI + 1`, for
+example `HE profile 2/3`.
 
 ## Tray states
 
 | State | Tooltip example |
 | --- | --- |
-| 2.4 GHz | `Keychron K8 HE: 91% - 2.4 GHz` |
-| 2.4 GHz with USB power | `Keychron K8 HE: 91% - 2.4 GHz - USB power` |
-| Wired | `Keychron K8 HE: Wired - USB power` |
-| Not detected | `Keychron K8 HE: Not detected - last seen 91%` |
+| Wired and charging | `K8 HE: 100% - Wired - 4172 mV - Charging - HE profile 2/3` |
+| Wired and full | `K8 HE: 100% - Wired - 4172 mV - Full - HE profile 2/3` |
+| 2.4 GHz | `K8 HE: 91% - 2.4 GHz - 4020 mV - HE profile 1/3` |
+| Not detected | `K8 HE: Not detected - last seen 91% - HE profile 1/3` |
 
-The app checks the receiver once per minute. Moving the pointer over the icon
+The app checks the keyboard once per minute. Moving the pointer over the icon
 can request an earlier check. Use **Refresh now** for an immediate check.
 
 ## Firmware files
 
-The custom firmware adds a read-only raw-HID command to the K8 HE.
+For this app, use the wired-aware files in
+[`firmware/k8_he_battery_rawhid_wired/`](firmware/k8_he_battery_rawhid_wired/):
 
-| Layout | Custom firmware |
+| Layout | Firmware file |
 | --- | --- |
-| ANSI / US | [`firmware/k8_he_ansi_battery_rawhid.bin`](firmware/k8_he_ansi_battery_rawhid.bin) |
-| ISO | [`firmware/k8_he_iso_battery_rawhid.bin`](firmware/k8_he_iso_battery_rawhid.bin) |
-| JIS | [`firmware/k8_he_jis_battery_rawhid.bin`](firmware/k8_he_jis_battery_rawhid.bin) |
+| ANSI / US | [`k8_he_ansi_battery_rawhid_wired.bin`](firmware/k8_he_battery_rawhid_wired/k8_he_ansi_battery_rawhid_wired.bin) |
+| ISO | [`k8_he_iso_battery_rawhid_wired.bin`](firmware/k8_he_battery_rawhid_wired/k8_he_iso_battery_rawhid_wired.bin) |
+| JIS | [`k8_he_jis_battery_rawhid_wired.bin`](firmware/k8_he_battery_rawhid_wired/k8_he_jis_battery_rawhid_wired.bin) |
 
 Use the file that matches the physical keyboard layout. Do not flash a file
 for another layout. The `.bin` file is the recommended file for QMK Toolbox.
 
-The matching official firmware files are in [`rollback/`](rollback/).
+The folder also contains the matching `.hex` files, SHA-256 checksums, the
+source patch, and the firmware README.
 
-The source patch is [`keychron-k8-he-battery.patch`](keychron-k8-he-battery.patch).
-It changes only the keyboard firmware. It does not change the receiver
-firmware, key behavior, battery math, or Bluetooth behavior.
+The older firmware files in `firmware/` report only the battery percentage.
+They do not provide the wired-mode fields used by the current app.
 
 ## Recovery
 
-If the custom firmware causes a problem, flash the matching file from
+If the custom firmware causes a problem, flash the matching official file from
 [`rollback/`](rollback/) with QMK Toolbox.
 
 Use Cable mode and a direct USB connection for recovery. Do not update the

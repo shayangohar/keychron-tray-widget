@@ -4,3 +4,4 @@
 .nuget-packages/
 .nuget-build.config
 publish/
+qmk_firmware_fork/

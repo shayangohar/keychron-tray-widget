@@ -24,7 +24,15 @@ internal static class Program
             try
             {
                 var result = KeychronHid.Read();
-                Console.WriteLine($"WiredPresent={result.WiredPresent}; WirelessBattery={result.WirelessBattery?.ToString() ?? "none"}");
+                var battery = result.Battery;
+                var profile = result.AnalogProfile;
+                Console.WriteLine(
+                    $"WiredPresent={result.WiredPresent}; " +
+                    $"Battery={battery?.Percentage.ToString() ?? "none"}; " +
+                    $"VoltageMillivolts={battery?.VoltageMillivolts?.ToString() ?? "unknown"}; " +
+                    $"Charging={battery?.Charging.ToString() ?? "unknown"}; " +
+                    $"Transport={battery?.Transport.ToString() ?? "unknown"}; " +
+                    $"AnalogProfile={(profile.HasValue ? $"{profile.Value.Index + 1}/{profile.Value.Count}" : "unknown")}");
             }
             finally
             {
