@@ -4,7 +4,7 @@
 
 This app works only with a Keychron keyboard that:
 
-- supports QMK firmware; and
+- supports QMK firmware
 - supports wireless 2.4 GHz mode.
 
 The keyboard must also use the required custom firmware patch.
